@@ -1,2 +1,4 @@
 data_acquisition/datatest/*
-preprocess/fastqc-result/*
+preprocess/fastqc-result/*.html
+preprocess/fastqc-result/*.zip
+preprocess/fastqc-result/*_fastqc
