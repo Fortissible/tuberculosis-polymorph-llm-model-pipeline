@@ -1,4 +1,24 @@
+#downloaded datasets
 data_acquisition/datatest/*
+
+#tools results
 preprocess/fastqc-result/*.html
 preprocess/fastqc-result/*.zip
 preprocess/fastqc-result/*_fastqc
+preprocess/trimmomatic-result/*-trimmed
+preprocess/*.sam
+preprocess/*.bam
+preprocess/*.bam.bai
+preprocess/*.csv
+preprocess/*.avinput
+preprocess/*.filtered.vcf
+preprocess/*.raw.vcf
+preprocess/*.bt2
+
+#libs & tools
+preprocess/annovar
+preprocess/bcftools
+preprocess/bowtie2
+preprocess/samtools
+preprocess/trimmomatic
+miniconda
