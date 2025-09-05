@@ -1,5 +1,5 @@
 # tuberculosis-polymorph-llm-model-pipeline
- This project is a bioinformatics tool & python based pipeline for Modeling the Association of Gene Polymorphisms and Drug Resistance in Mycobacterium tuberculosis Using Deep Learning and Large Language Models
+ This project is a doctoral research on MTB Genetic Analysis on Drug Resistance fields in bioinformatics tool & python based pipeline Modeling the Association of Gene Polymorphisms and Drug Resistance in Mycobacterium tuberculosis Using Deep Learning and Large Language Models. This is a continuation from previous research https://github.com/Fortissible/tuberculosis-resistance-classification
  
  ```use dos2unix if there's error when running the sh script```
  
