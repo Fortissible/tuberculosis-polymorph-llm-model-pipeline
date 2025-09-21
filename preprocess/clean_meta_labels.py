@@ -2,13 +2,28 @@
 import pandas as pd
 
 # Load features
-X = pd.read_csv("variant_presence_matrix.csv", index_col=0)
+X = pd.read_csv(
+    "E:/Project/tuberculosis-polymorph-llm-model-pipeline/preprocess/dataset-test/mutation-tables/variant_presence_matrix.csv",
+    index_col=0
+)
+
+# --- Keep only *.sorted.raw and strip suffix to bare accession ---
+# Drop non-raw (e.g., *.sorted.filtered)
+X = X[X.index.str.endswith(".sorted.raw")]
+# Strip ".sorted.raw" -> "ERR123456"
+X.index = X.index.str.replace(r"\.sorted\.raw$", "", regex=True)
+
+# If any duplicates appear after stripping, keep the max per feature
+# (works well for binary 0/1 matrices; adjust if needed)
+if X.index.duplicated().any():
+    X = X.groupby(level=0).max()
 
 # Load meta
-meta = pd.read_csv("alldata_sheet16_classes.csv")
+meta = pd.read_csv(
+    "E:/Project/tuberculosis-polymorph-llm-model-pipeline/preprocess/dataset-test/mutation-tables/cryptic_genome_raw_meta_label.csv"
+)
 
 # Normalize IDs so they match the feature matrix index.
-# If your build_mutkeys.py used filename stems that match 'accession', this will align.
 meta = meta.rename(columns={"accession": "sample_id"}).set_index("sample_id")
 
 # Helper to map string phenotype to int if numeric not present
@@ -30,14 +45,16 @@ labels["label_PZA"] = meta.get("phen_pza")
 if labels["label_PZA"].isnull().any() and "Phenotype_Pyrazinamide" in meta:
     labels["label_PZA"] = labels["label_PZA"].fillna(map_str(meta["Phenotype_Pyrazinamide"]))
 
-# Lineage (as string); you can keep numeric values, we’ll one-hot later
+# Lineage (as string)
 lineage = meta["lineage"].astype(str)
 
-# Keep only samples present in X, and drop rows with missing labels per drug later
+# Align to samples present in X
 labels = labels.loc[X.index.intersection(labels.index)]
 lineage = lineage.loc[labels.index]
 
 # Save a clean meta for training
 clean = pd.concat([lineage.rename("lineage"), labels], axis=1)
-clean.to_csv("meta_labels.csv")
+clean.to_csv(
+    "E:/Project/tuberculosis-polymorph-llm-model-pipeline/preprocess/dataset-test/mutation-tables/meta_labels.csv"
+)
 print("Wrote meta_labels.csv with shape", clean.shape)
