@@ -1,0 +1,17 @@
+{
+  "drug": "EMB",
+  "n": 18,
+  "n_pos": 12,
+  "n_neg": 6,
+  "threshold": 0.05,
+  "auroc": 0.8055555555555556,
+  "auprc": 0.8885954323454325,
+  "confusion": {
+    "tn": 0,
+    "fp": 6,
+    "fn": 0,
+    "tp": 12
+  },
+  "sensitivity": 1.0,
+  "specificity": 0.0
+}

@@ -1,0 +1,398 @@
+import pandas as pd
+import numpy as np
+import random
+import math
+import time
+import copy
+import collections
+import pickle
+import ast
+import json
+
+from joblib import Parallel, delayed
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.datasets import load_breast_cancer
+import matplotlib.pyplot as plt
+
+from sklearn import tree
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import KFold
+from sklearn import tree as sk_tree
+from sklearn.tree import export_graphviz
+from subprocess import call
+import graphviz
+
+import pydot
+from IPython.display import Image
+
+from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.metrics import precision_score, recall_score, f1_score, fbeta_score
+from sklearn.metrics import roc_curve, roc_auc_score
+
+from mlrf.MultiLabelRandomForest import RandomForestClassifier as MLRF
+from mlrf.ReinforcedRandomForest import RandomForestClassifier as RRF
+from mlrf.Metric import *
+
+
+def create_MLRFtree_visualization(data, graph, parent_node=None, left_id=0, right_id=0):
+    if 'leaf_value' in data:
+        leaf_node = pydot.Node(
+            str(left_id)+str(right_id)+"\n"+
+            str(data['leaf_value'][0])+
+            str(data['leaf_value'][1])+"\n"+
+            str(data['leaf_value'][2])+
+            str(data['leaf_value'][3]))
+        graph.add_node(leaf_node)
+        if parent_node:
+            graph.add_edge(pydot.Edge(parent_node, leaf_node))
+    else:
+        split_feature = data['split_feature']
+        split_value = data['split_value']
+        node_label = f"{left_id}{right_id}\n{split_feature}\n<= {split_value}"
+
+        node = pydot.Node(node_label, shape='box')
+        graph.add_node(node)
+        if parent_node:
+            graph.add_edge(pydot.Edge(parent_node, node))
+
+        left_tree = data['left_tree']
+        right_tree = data['right_tree']
+        create_MLRFtree_visualization(left_tree, graph, node, left_id=left_id+1, right_id=right_id)
+        create_MLRFtree_visualization(right_tree, graph, node, left_id=left_id, right_id=right_id+1)
+
+
+def dataSplitting(dataFrame):
+    x_multilabel, y_multilabel = dataFrame.iloc[:, :-4], dataFrame.iloc[:, -4:]  # multilabel
+    X_train, X_test, y_train, y_test = train_test_split(x_multilabel, y_multilabel, test_size=0.3)
+    return X_train, X_test, y_train, y_test
+
+
+def useSLRF(X_train, X_test, y_train, y_test):
+    model_10_10_20 = []
+    model_25_10_20 = []
+    model_50_25_15 = []
+    for i in range(0,4):
+        print(y_train.columns[i])
+        with open(f'model_{y_train.columns[i]}_sklearn_RF_GSO_w_KCV_param_10_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+            model_10_10_20.append(pickle.load(f))
+        with open(f'model_{y_train.columns[i]}_sklearn_RF_GSO_w_KCV_param_25_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+            model_25_10_20.append(pickle.load(f))
+        with open(f'model_{y_train.columns[i]}_sklearn_RF_GSO_w_KCV_param_50_25_15.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+            model_50_25_15.append(pickle.load(f))
+
+    model_list = [model_10_10_20, model_25_10_20, model_50_25_15]
+    model_list_name = ["model_10_10_20", "model_25_10_20", "model_50_25_15"]
+
+    for model_idx, model in enumerate(model_list):
+        model_pred_proba = []
+        model_y_test = []
+        for i in range(0, 4):
+
+            train_pred = model[i].predict(X_train)
+            test_pred = model[i].predict(X_test)
+
+            print(f"\n\n-------Resistance {y_train.columns[i]} Model {model_list_name[model_idx]}-------")
+
+            # ---TRAIN---
+
+            # print("actual:\t", np.array(y_train))
+            # print("pred:\t", np.array(train_pred))
+
+            print("\nTRAINING\n")
+            metric_confusion_matrix(
+                y_train[y_train.columns[i]],
+                train_pred,
+                f"Train-{y_train.columns[i]}-Model-SLRF-{model_list_name[model_idx]}"
+            )
+            metric_all_score(
+                y_train[y_train.columns[i]],
+                train_pred
+            )
+
+            # ---TEST---
+
+            # print("actual:\t", np.array(y_test))
+            # print("pred:\t", np.array(test_pred))
+
+            print("\nTESTING\n")
+            metric_confusion_matrix(
+                y_test[y_test.columns[i]],
+                test_pred,
+                f"Test-{y_test.columns[i]}-Model-SLRF-{model_list_name[model_idx]}",
+                visualize=True
+            )
+            metric_all_score(
+                y_test[y_test.columns[i]],
+                test_pred
+            )
+
+            pred_proba = model[i].predict_proba(X_test)[:, 1]
+            model_pred_proba.append(pred_proba)
+            model_y_test.append(y_test[y_test.columns[i]].to_numpy())
+
+        mean_test_pred_proba = np.vstack((model_pred_proba[0],
+                                          model_pred_proba[1],
+                                          model_pred_proba[2],
+                                          model_pred_proba[3])
+                                         ).T
+
+        vstack_model_y_test = np.vstack((model_y_test[0],
+                                         model_y_test[1],
+                                         model_y_test[2],
+                                         model_y_test[3])
+                                        ).T
+        y_test_new = pd.DataFrame(data=vstack_model_y_test,
+                              columns=["label_INH", "label_RIF", "label_EMB", "label_PZA"])
+
+        metric_roc_auc(y_test_new,mean_test_pred_proba, model_list_name[model_idx], model_type="SLRF")
+
+
+def printSLRFDecisionTree(X_test, y_test):
+    model_10_10_20 = []
+    model_25_10_20 = []
+    model_50_25_15 = []
+
+    for i in range(0,4):
+        with open(f'model_{y_test.columns[i]}_sklearn_RF_GSO_w_KCV_param_10_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+            model_10_10_20.append(pickle.load(f))
+        with open(f'model_{y_test.columns[i]}_sklearn_RF_GSO_w_KCV_param_25_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+            model_25_10_20.append(pickle.load(f))
+        with open(f'model_{y_test.columns[i]}_sklearn_RF_GSO_w_KCV_param_50_25_15.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+            model_50_25_15.append(pickle.load(f))
+
+    model_list = [model_10_10_20, model_25_10_20, model_50_25_15]
+    model_list_name = ["model_10_10_20", "model_25_10_20", "model_50_25_15"]
+
+    for model_idx, model in enumerate(model_list):
+        for i in range(0,4):
+            dot_filename = f'DT0_SLRF_{y_test.columns[i]}_Model_{model_list_name[model_idx]}.dot'
+            png_filename = f'DT0_SLRF_{y_test.columns[i]}_Model_{model_list_name[model_idx]}.png'
+            dot_path = get_metric_path("decision_tree", dot_filename)
+            png_path = get_metric_path("decision_tree", png_filename)
+            export_graphviz(model_list[model_idx][i].estimators_[0], out_file=str(dot_path),
+                               feature_names=X_test.columns,
+                               max_depth=10,
+                               class_names=["0","1"],
+                               rounded=True, proportion=False,
+                               filled=True)
+            call(['dot', '-Tpng', str(dot_path), '-o', str(png_path), '-Gdpi=600'])
+
+
+def printSLRFFeatureImportances(X_train ,y_train):
+    model_10_10_20 = []
+    model_25_10_20 = []
+    model_50_25_15 = []
+    for i in range(0, 4):
+        print(y_train.columns[i])
+        with open(f'model_{y_train.columns[i]}_sklearn_RF_GSO_w_KCV_param_10_10_20.sav',
+                  'rb') as f:  # Python 3: open(..., 'rb')
+            model_10_10_20.append(pickle.load(f))
+        with open(f'model_{y_train.columns[i]}_sklearn_RF_GSO_w_KCV_param_25_10_20.sav',
+                  'rb') as f:  # Python 3: open(..., 'rb')
+            model_25_10_20.append(pickle.load(f))
+        with open(f'model_{y_train.columns[i]}_sklearn_RF_GSO_w_KCV_param_50_25_15.sav',
+                  'rb') as f:  # Python 3: open(..., 'rb')
+            model_50_25_15.append(pickle.load(f))
+
+    model_list = [model_10_10_20, model_25_10_20, model_50_25_15]
+    model_list_name = ["model_10_10_20", "model_25_10_20", "model_50_25_15"]
+
+    for model_idx, model in enumerate(model_list):
+        for i in range(0, 4):
+            print(len(model[i].feature_importances_), model[i].feature_importances_)
+            print("\n\n")
+            importances = model[i].feature_importances_
+
+            std = np.std([model_tree.feature_importances_ for model_tree in model[i].estimators_], axis=0)
+            std = (np.sort(std)[::-1])[:20]
+            forest_importances = pd.Series(importances, index=X_train.columns)
+            forest_importances = forest_importances.sort_values(ascending=False)[:20]
+
+            fig, ax = plt.subplots()
+            forest_importances.plot.bar(yerr=std, ax=ax)
+            ax.set_title(f"SLRF {model_list_name[model_idx]} {y_train.columns[i]} Feature importances using MDI")
+            ax.set_ylabel("Mean decrease in impurity")
+            fig.tight_layout()
+            fi_filename = f'SLRF_{model_list_name[model_idx]}_{y_train.columns[i]}_Feature_importances_MDI.png'
+            fi_path = get_metric_path("feature_importance", fi_filename)
+            plt.savefig(str(fi_path))
+            plt.show()
+            plt.close(fig)
+
+
+def useMLRF(X_train, X_test, y_train, y_test):
+
+    with open('model_GSO_w_KCV_param_10_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_10_10_20 = pickle.load(f)
+
+    with open('model_GSO_w_KCV_param_25_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_25_10_20 = pickle.load(f)
+
+    with open('model_GSO_w_KCV_param_50_25_15.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_50_25_15 = pickle.load(f)
+
+    model_list = [model_10_10_20, model_25_10_20, model_50_25_15]
+    model_list_name = ["model_10_10_20", "model_25_10_20", "model_50_25_15"]
+
+    for model_idx, model in enumerate(model_list) :
+        train_pred_res, train_pred_rmg_list, train_pred_leaf_loc_list, train_tree_feature_path = model.predict(X_train)
+        test_pred_res, test_pred_rmg_list, test_pred_leaf_loc_list, test_tree_feature_path = model.predict(X_test)
+
+        for col_idx, column in enumerate(y_train.columns):
+            print(f"\n\n-------Resistance {column} Model {model_list_name[model_idx]}-------")
+
+            # ---TRAIN---
+
+            # print("actual:\t", np.array(y_train[column]))
+            # print("pred:\t", np.array(train_pred_res[:, col_idx]))
+
+            print("\nTRAINING\n")
+            metric_confusion_matrix(
+                y_train[column],
+                train_pred_res[:, col_idx],
+                f"Train-{column}-Model-MLRF-{model_list_name[model_idx]}"
+            )
+            metric_all_score(
+                y_train[column],
+                train_pred_res[:, col_idx]
+            )
+
+            # ---TEST---
+
+            # print("actual:\t", np.array(y_test[column]))
+            # print("pred:\t", np.array(test_pred_res[:, col_idx]))
+
+            print("\nTESTING\n")
+            metric_confusion_matrix(
+                y_test[column],
+                test_pred_res[:, col_idx],
+                f"Test-{column}-Model-MLRF-{model_list_name[model_idx]}",
+                visualize=True
+            )
+
+            metric_all_score(
+                y_test[column],
+                test_pred_res[:, col_idx]
+            )
+
+        mean_test_pred_proba = metric_get_predict_proba(test_pred_leaf_loc_list, test_pred_rmg_list)
+
+        metric_roc_auc(y_test, mean_test_pred_proba, model_list_name[model_idx], model_type="MLRF")
+
+        if model_idx+1 != len(model_list):
+            print(f"\n\n--------- Next Model {model_list_name[model_idx+1]} ---------")
+
+
+def printMLRFDecisionTree():
+
+    with open('model_GSO_w_KCV_param_10_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_10_10_20 = pickle.load(f)
+
+    with open('model_GSO_w_KCV_param_25_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_25_10_20 = pickle.load(f)
+
+    with open('model_GSO_w_KCV_param_50_25_15.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_50_25_15 = pickle.load(f)
+
+    model_list = [model_10_10_20, model_25_10_20, model_50_25_15]
+    model_list_name = ["model_10_10_20", "model_25_10_20", "model_50_25_15"]
+
+    for model_idx, model in enumerate(model_list):
+        template_model = MLRF(n_estimators=0,
+                   max_depth=0,
+                   min_samples_split=0,
+                   min_samples_leaf=2,
+                   min_split_gain=0.0005,
+                   colsample_bytree="sqrt",
+                   subsample=0.8,
+                   random_state=77,
+                   classifier_type="gini",
+                   multilabel=True
+                   )
+        template_model.n_estimators = model.n_estimators
+        template_model.max_depth = model.max_depth
+        template_model.min_samples_split = model.min_samples_split
+        template_model.min_samples_leaf = model.min_samples_leaf
+        template_model.min_split_gain = model.min_split_gain
+        template_model.colsample_bytree = model.colsample_bytree
+        template_model.subsample = model.subsample
+        template_model.random_state = model.random_state
+        template_model.trees = model.trees
+        template_model.feature_importances_ = model.feature_importances_
+        template_model.classifier_type = model.classifier_type
+        template_model.multilabel = model.multilabel
+
+        graph = pydot.Dot(graph_type="digraph")
+
+        data = template_model.trees[0].describe_tree()
+        create_MLRFtree_visualization(data, graph)
+
+        # Save the graph as a PNG file within the metrics directory
+        print(graph, "\n\n")
+        tree_png_path = get_metric_path("decision_tree", f'MLRF_Model_{model_list_name[model_idx]}_tree_example.png')
+        graph.write_png(str(tree_png_path))
+
+
+def printMLRFFeatureImportances(X_train, X_test, y_train, y_test):
+    model_10_10_20 = None
+    model_25_10_20 = None
+    model_50_25_15 = None
+
+    with open('model_GSO_w_KCV_param_10_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_10_10_20 = pickle.load(f)
+
+    with open('model_GSO_w_KCV_param_25_10_20.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_25_10_20 = pickle.load(f)
+
+    with open('model_GSO_w_KCV_param_50_25_15.sav', 'rb') as f:  # Python 3: open(..., 'rb')
+        model_50_25_15 = pickle.load(f)
+
+    model_list = [model_10_10_20, model_25_10_20, model_50_25_15]
+    model_list_name = ["model_10_10_20", "model_25_10_20", "model_50_25_15"]
+
+    for model_idx, model in enumerate(model_list):
+        print(model.feature_importances_)
+        fi_filename = f'MLRF_{model_list_name[model_idx]}_feature_importances.json'
+        fi_path = get_metric_path("feature_importance", fi_filename)
+        with open(fi_path, 'w', encoding='utf-8') as f:
+            json.dump(model.feature_importances_, f, indent=2)
+
+
+if __name__ == "__main__":
+    dataFrame = pd.read_csv(f'mlrf_input.csv', sep=",")
+    dataFrame = dataFrame.drop('sample_id', axis=1)
+    dataFrame = dataFrame.sample(frac=1).reset_index(drop=True)
+
+    # # fit and transform the categorical variable
+    # encoded = pd.get_dummies(dataFrame["lineage"], prefix="lineage")
+    # print(encoded)
+    #
+    # # Drop lineage feature if exist (optional to drop)
+    # classes = dataFrame.iloc[:, -4:]
+    # print(classes)
+    #
+    # dataFrame = dataFrame.drop('lineage', axis=1)
+    # dataFrame = dataFrame.drop('phen_inh', axis=1)
+    # dataFrame = dataFrame.drop('phen_rif', axis=1)
+    # dataFrame = dataFrame.drop('phen_emb', axis=1)
+    # dataFrame = dataFrame.drop('phen_pza', axis=1)
+    # dataFrame_new = pd.concat([dataFrame, encoded, classes], axis=1, join='inner', copy=True)
+    # print(dataFrame_new)
+
+    X_train, X_test, y_train, y_test = dataSplitting(dataFrame)
+
+    print(y_train.columns.to_list)
+
+    printSLRFFeatureImportances(X_train, y_train)
+
+    useMLRF(X_train, X_test, y_train, y_test)
+    useSLRF(X_train, X_test, y_train, y_test)
+
+    printMLRFDecisionTree()
+    printSLRFDecisionTree(X_test, y_test)
+
+

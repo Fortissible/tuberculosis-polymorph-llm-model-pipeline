@@ -19,6 +19,18 @@ DRUGS        = ["INH", "RIF", "EMB", "PZA"]          # which drugs to evaluate
 OUT_CSV      = Path("./predictions_per_drug.csv")    # main predictions table
 # ===========================================
 
+def _safe_roc_auc(y_true, y_score):
+    y_true = np.asarray(y_true)
+    if np.unique(y_true).size < 2:
+        return None
+    return float(roc_auc_score(y_true, y_score))
+
+def _safe_auprc(y_true, y_score):
+    y_true = np.asarray(y_true)
+    if np.unique(y_true).size < 2:
+        return None
+    return float(average_precision_score(y_true, y_score))
+
 def load_expected_features(drug_dir: Path):
     final_model = load(drug_dir / "final_base_model.joblib")
     try:
@@ -58,6 +70,8 @@ def align_features(X: pd.DataFrame, expected_cols):
 
 def predict_for_drug(drug: str, X: pd.DataFrame, models_dir: Path):
     drug_dir = models_dir / drug
+    if not drug_dir.exists():
+        raise FileNotFoundError(f"no trained models found in {drug_dir}")
     expected_cols = load_expected_features(drug_dir)
     Xd = align_features(X, expected_cols)
     fold_models = load_fold_models(drug_dir)
@@ -72,8 +86,10 @@ def predict_for_drug(drug: str, X: pd.DataFrame, models_dir: Path):
     return probs, calls, thr
 
 def plot_roc(y_true, y_prob, out_png, title="ROC Curve"):
+    auc = _safe_roc_auc(y_true, y_prob)
+    if auc is None:
+        return None
     fpr, tpr, _ = roc_curve(y_true, y_prob)
-    auc = roc_auc_score(y_true, y_prob)
     plt.figure()
     plt.plot(fpr, tpr, label=f"AUROC = {auc:.3f}")
     plt.plot([0,1], [0,1], linestyle="--")
@@ -84,10 +100,13 @@ def plot_roc(y_true, y_prob, out_png, title="ROC Curve"):
     plt.tight_layout()
     plt.savefig(out_png, dpi=150)
     plt.close()
+    return auc
 
 def plot_pr(y_true, y_prob, out_png, title="Precision-Recall Curve"):
+    auprc = _safe_auprc(y_true, y_prob)
+    if auprc is None:
+        return None
     precision, recall, _ = precision_recall_curve(y_true, y_prob)
-    auprc = average_precision_score(y_true, y_prob)
     plt.figure()
     plt.plot(recall, precision, label=f"AUPRC = {auprc:.3f}")
     plt.xlabel("Recall (Sensitivity)")
@@ -97,10 +116,11 @@ def plot_pr(y_true, y_prob, out_png, title="Precision-Recall Curve"):
     plt.tight_layout()
     plt.savefig(out_png, dpi=150)
     plt.close()
+    return auprc
 
 def plot_confusion(y_true, y_pred, out_png, title="Confusion Matrix"):
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-    cm = np.array([[tn, fp],[fn, tp]])
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel()
     plt.figure()
     plt.imshow(cm, cmap="Blues")
     plt.title(title)
@@ -137,8 +157,13 @@ def main():
     per_drug_summaries = []
 
     for drug in DRUGS:
-        print(f"[{drug}] predicting & evaluating…")
-        probs, calls, thr = predict_for_drug(drug, X, MODELS_DIR)
+        print(f"[{drug}] predicting & evaluating...")
+        try:
+            probs, calls, thr = predict_for_drug(drug, X, MODELS_DIR)
+        except (FileNotFoundError, RuntimeError) as exc:
+            print(f"  Skipping {drug}: {exc}")
+            continue
+
         all_preds[f"prob_{drug}"] = probs
         all_preds[f"call_{drug}"] = calls
         thresholds[drug] = thr
@@ -155,9 +180,13 @@ def main():
             y_prob = all_preds.loc[idx, f"prob_{drug}"].values
             y_pred = (y_prob >= thr).astype(int)
 
-            auroc = roc_auc_score(y_true, y_prob)
-            auprc = average_precision_score(y_true, y_prob)
-            tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+            if len(y_true) == 0:
+                print(f"  Warning: no ground-truth labels available for {drug}; skipping evaluation.")
+                continue
+
+            auroc = _safe_roc_auc(y_true.values, y_prob)
+            auprc = _safe_auprc(y_true.values, y_prob)
+            tn, fp, fn, tp = plot_confusion(y_true.values, y_pred, drug_dir / "confusion_matrix.png", title=f"{drug} Confusion")
             sens = tp / max(1, (tp + fn))
             spec = tn / max(1, (tn + fp))
 
@@ -169,28 +198,33 @@ def main():
             }).set_index("sample_id")
             per_sample.to_csv(drug_dir / "per_sample_predictions.csv")
 
-            plot_roc(y_true.values, y_prob, drug_dir / "roc_curve.png", title=f"{drug} ROC")
-            plot_pr(y_true.values, y_prob, drug_dir / "pr_curve.png", title=f"{drug} PR")
-            tn, fp, fn, tp = plot_confusion(y_true.values, y_pred, drug_dir / "confusion_matrix.png", title=f"{drug} Confusion")
+            if auroc is not None:
+                plot_roc(y_true.values, y_prob, drug_dir / "roc_curve.png", title=f"{drug} ROC")
+            if auprc is not None:
+                plot_pr(y_true.values, y_prob, drug_dir / "pr_curve.png", title=f"{drug} PR")
 
             summary = {
                 "drug": drug,
                 "n": int(len(y_true)),
-                "n_pos": int((y_true==1).sum()),
-                "n_neg": int((y_true==0).sum()),
+                "n_pos": int((y_true == 1).sum()),
+                "n_neg": int((y_true == 0).sum()),
                 "threshold": float(thr),
-                "auroc": float(auroc),
-                "auprc": float(auprc),
+                "auroc": auroc,
+                "auprc": auprc,
                 "confusion": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
                 "sensitivity": float(sens),
-                "specificity": float(spec)
+                "specificity": float(spec),
             }
             with open(drug_dir / "summary.json", "w") as f:
                 json.dump(summary, f, indent=2)
             per_drug_summaries.append(summary)
-            print(f"  AUROC={auroc:.3f} AUPRC={auprc:.3f} thr={thr:.3f}  TP={tp} FP={fp} FN={fn} TN={tn}")
+
+            fmt_auc = "N/A" if auroc is None else f"{auroc:.3f}"
+            fmt_aupr = "N/A" if auprc is None else f"{auprc:.3f}"
+            print(f"  AUROC={fmt_auc} AUPRC={fmt_aupr} thr={thr:.3f}  TP={tp} FP={fp} FN={fn} TN={tn}")
         else:
             print(f"  Warning: {ycol} not in meta; skipping evaluation for {drug}")
+
 
     # Combined predictions CSV and summaries
     all_preds.to_csv(OUT_CSV)

@@ -30,16 +30,47 @@ def main():
     X = X.loc[common]
     meta = meta.loc[common]
 
-    # Shuffle consistently
-    rng = np.random.RandomState(SEED)
-    perm = rng.permutation(len(common))
-    X = X.iloc[perm]
-    meta = meta.iloc[perm]
+    label_cols = [c for c in meta.columns if c.startswith("label_")]
+    if not label_cols:
+        raise SystemExit("meta file must contain at least one 'label_' column (prefix 'label_').")
 
-    # Split 80/20
-    n_train = int(len(common) * TRAIN_RATIO)
-    X_train, X_pred = X.iloc[:n_train].copy(), X.iloc[n_train:].copy()
-    meta_train, meta_pred = meta.iloc[:n_train].copy(), meta.iloc[n_train:].copy()
+    # Retain only label columns; treat lineage as features (already in X)
+    meta = meta[label_cols]
+
+    rng = np.random.RandomState(SEED)
+    n_total = len(common)
+    n_train = int(n_total * TRAIN_RATIO)
+    if n_train == 0 or n_train == n_total:
+        raise SystemExit("Train ratio leaves no samples for train or predict split.")
+
+    max_attempts = 500
+    for attempt in range(1, max_attempts + 1):
+        perm = rng.permutation(n_total)
+        X_shuffled = X.iloc[perm]
+        meta_shuffled = meta.iloc[perm]
+
+        X_train = X_shuffled.iloc[:n_train].copy()
+        X_pred = X_shuffled.iloc[n_train:].copy()
+        meta_train = meta_shuffled.iloc[:n_train].copy()
+        meta_pred = meta_shuffled.iloc[n_train:].copy()
+
+        def _has_label_support(df):
+            for col in label_cols:
+                col_values = df[col].dropna().astype(int)
+                if col_values.empty:
+                    return False
+                positives = int(col_values.sum())
+                if positives == 0 or positives == len(col_values):
+                    return False
+            return True
+
+        labels_ok = _has_label_support(meta_train) and _has_label_support(meta_pred)
+        if labels_ok:
+            break
+        if attempt == max_attempts:
+            raise SystemExit("Unable to generate a split with positive coverage for each label after multiple attempts.")
+    else:
+        raise SystemExit("Unexpected error preparing split.")
 
     # Make dirs
     OUT_TRAIN.mkdir(parents=True, exist_ok=True)

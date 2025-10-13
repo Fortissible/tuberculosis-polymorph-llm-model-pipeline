@@ -1,0 +1,17 @@
+{
+  "drug": "INH",
+  "n": 18,
+  "n_pos": 7,
+  "n_neg": 11,
+  "threshold": 0.05,
+  "auroc": 1.0,
+  "auprc": 0.9999999999999998,
+  "confusion": {
+    "tn": 2,
+    "fp": 9,
+    "fn": 0,
+    "tp": 7
+  },
+  "sensitivity": 1.0,
+  "specificity": 0.18181818181818182
+}

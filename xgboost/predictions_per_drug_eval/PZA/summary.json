@@ -1,0 +1,17 @@
+{
+  "drug": "PZA",
+  "n": 18,
+  "n_pos": 14,
+  "n_neg": 4,
+  "threshold": 0.05,
+  "auroc": 0.5357142857142857,
+  "auprc": 0.8689359076964119,
+  "confusion": {
+    "tn": 0,
+    "fp": 4,
+    "fn": 0,
+    "tp": 14
+  },
+  "sensitivity": 1.0,
+  "specificity": 0.0
+}

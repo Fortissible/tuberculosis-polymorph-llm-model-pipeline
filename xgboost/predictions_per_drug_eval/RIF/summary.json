@@ -1,0 +1,17 @@
+{
+  "drug": "RIF",
+  "n": 18,
+  "n_pos": 15,
+  "n_neg": 3,
+  "threshold": 0.05,
+  "auroc": 1.0,
+  "auprc": 1.0,
+  "confusion": {
+    "tn": 0,
+    "fp": 3,
+    "fn": 0,
+    "tp": 15
+  },
+  "sensitivity": 1.0,
+  "specificity": 0.0
+}
